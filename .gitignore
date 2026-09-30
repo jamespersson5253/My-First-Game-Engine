@@ -1,0 +1,15 @@
+# Editor junk
+.vscode/**
+
+# Build outputs
+**/build/**
+**/bin/**
+
+# Test Compilations
+*.o
+*.obj
+*.exe
+
+# OS Junk
+**/.DS_Store/**
+**/Thumbs.db/**

@@ -281,8 +281,6 @@ int main() {
 
     GLFWmonitor* monitor = glfwGetPrimaryMonitor();
     const GLFWvidmode* mode = glfwGetVideoMode(monitor);
-
-    int refreshRate = mode->refreshRate;
     
     float walkSpeed = 3.f;
     float delta = 0.f;

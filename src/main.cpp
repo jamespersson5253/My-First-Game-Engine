@@ -88,6 +88,8 @@ glm::mat4 proj = glm::perspective(
 
 void fbRszCallback(GLFWwindow* window, int width, int height) {
     gl.Viewport(0, 0, width, height);
+    if(height == 0)
+        return;
     proj = glm::perspective(
         glm::radians(90.f),
         static_cast<float>(width) / static_cast<float>(height),
@@ -264,9 +266,9 @@ int main() {
         return -1;
     }
 
-    GLuint modelLoc = gl.GetUniformLocation(prog, "model");
-    GLuint viewLoc = gl.GetUniformLocation(prog, "view");
-    GLuint projectionLoc = gl.GetUniformLocation(prog, "projection");
+    GLint modelLoc = gl.GetUniformLocation(prog, "model");
+    GLint viewLoc = gl.GetUniformLocation(prog, "view");
+    GLint projectionLoc = gl.GetUniformLocation(prog, "projection");
 
     gl.DeleteShader(vert);
     gl.DeleteShader(frag);
@@ -283,14 +285,14 @@ int main() {
     int refreshRate = mode->refreshRate;
     
     float walkSpeed = 3.f;
-    float delta = 1.f/static_cast<float>(refreshRate);
-    float timeBegin = glfwGetTime();
-    float timeEnd = glfwGetTime() + delta;
+    float delta = 0.f;
+    float timeEnd = glfwGetTime();
+    float timeBegin;
 
     static bool f1WasDown = false;
     static bool escWasDown = false;
     
-    bool mouseFree;
+    bool mouseFree = 0;
 
     gl.ClearColor(.0f, .0f, .0f, 1.f);
     gl.UseProgram(prog);
@@ -306,7 +308,9 @@ int main() {
                 SetForegroundWindow(console);
 
             std::cin >> path;
-            path += ".msh";
+
+            if (path.size() < 4 || path.substr(path.size() - 4) != ".msh")
+                path += ".msh";
             formatMesh(getFile("meshes/"+path));
             gl.BindVertexArray(VAO);
             
@@ -324,7 +328,6 @@ int main() {
                 inds.data(),
                 GL_DYNAMIC_DRAW
             );
-            gl.BindVertexArray(VAO);
 
             SetForegroundWindow((HWND)glfwGetWin32Window(window));
         }
@@ -384,7 +387,7 @@ int main() {
         gl.UniformMatrix4fv(viewLoc, 1, GL_FALSE, glm::value_ptr(view));
         gl.UniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
 
-        gl.DrawElements(GL_TRIANGLES, inds.size(), GL_UNSIGNED_INT, nullptr);
+        gl.DrawElements(GL_TRIANGLES, static_cast<GLsizei>(inds.size()), GL_UNSIGNED_INT, nullptr);
         
         glfwSwapBuffers(window);
         timeEnd = glfwGetTime();

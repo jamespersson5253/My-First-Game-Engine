@@ -89,6 +89,7 @@ glm::mat4 proj = glm::perspective(
 void fbRszCallback(GLFWwindow* window, int width, int height) {
     if(height == 0)
         return;
+    
         gl.Viewport(0, 0, width, height);
     proj = glm::perspective(
         glm::radians(90.f),
@@ -99,7 +100,7 @@ void fbRszCallback(GLFWwindow* window, int width, int height) {
 
 glm::vec3 eyePos(0, 0, 1);
 glm::vec3 legPos(0, -2, 1);
-glm::vec3 dir(0, 0, 1);
+glm::vec3 dir(0, 0, -1);
 float pitch = 0;
 float yaw = -90;
 

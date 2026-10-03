@@ -90,7 +90,7 @@ void fbRszCallback(GLFWwindow* window, int width, int height) {
     if(height == 0)
         return;
     
-        gl.Viewport(0, 0, width, height);
+    gl.Viewport(0, 0, width, height);
     proj = glm::perspective(
         glm::radians(90.f),
         static_cast<float>(width) / static_cast<float>(height),

@@ -98,8 +98,8 @@ void fbRszCallback(GLFWwindow* window, int width, int height) {
     );
 }
 
-glm::vec3 eyePos(0, 0, 1);
-glm::vec3 legPos(0, -2, 1);
+glm::vec3 eyePos(0, 22, 0);
+glm::vec3 legPos(0, 20, 0);
 glm::vec3 dir(0, 0, -1);
 float pitch = 0;
 float yaw = -90;
@@ -145,6 +145,285 @@ void mouse_callback(GLFWwindow* window, double xpos, double ypos)
         glm::sin(pitchR),
         glm::sin(yawR) * glm::cos(pitchR)
     );
+}
+
+bool pointInsideTriangle(
+    glm::vec3 P,
+    glm::vec3 A,
+    glm::vec3 B,
+    glm::vec3 C
+)
+{
+    glm::vec3 n = glm::normalize(
+        glm::cross(B - A, C - A)
+    );
+
+    glm::vec3 c0 = glm::cross(B - A, P - A);
+    glm::vec3 c1 = glm::cross(C - B, P - B);
+    glm::vec3 c2 = glm::cross(A - C, P - C);
+
+    return glm::dot(c0, n) >= 0.0f &&
+           glm::dot(c1, n) >= 0.0f &&
+           glm::dot(c2, n) >= 0.0f;
+}
+
+float findTOI(
+    glm::vec3 pos,
+    glm::vec3 velocity,
+    float radius,
+    glm::vec3 A,
+    glm::vec3 B,
+    glm::vec3 C,
+    float dt)
+{
+    glm::vec3 normal =
+        glm::normalize(glm::cross(B - A, C - A));
+
+    float d0 = glm::dot(pos - A, normal);
+    float vn = glm::dot(velocity, normal);
+
+    if (d0 < 0.0f)
+    {
+        normal = -normal;
+        d0 = -d0;
+        vn = -vn;
+    }
+
+    if (vn >= 0.0f)
+        return -1.0f;
+
+    float toi = (d0 - radius) / -vn;
+
+    if (toi < 0.0f || toi > dt)
+        return -1.0f;
+
+    glm::vec3 impactPos =
+        pos + velocity * toi;
+
+    float distance =
+        glm::dot(impactPos - A, normal);
+
+    glm::vec3 contactPoint =
+        impactPos - distance * normal;
+
+    glm::vec3 c0 =
+        glm::cross(B - A, contactPoint - A);
+
+    glm::vec3 c1 =
+        glm::cross(C - B, contactPoint - B);
+
+    glm::vec3 c2 =
+        glm::cross(A - C, contactPoint - C);
+
+    if (glm::dot(c0, normal) < 0.0f ||
+        glm::dot(c1, normal) < 0.0f ||
+        glm::dot(c2, normal) < 0.0f)
+    {
+        return -1.0f;
+    }
+
+    return toi;
+}
+
+glm::vec3 getVertexPosition(
+    const std::vector<float>& vertices,
+    unsigned int index)
+{
+    size_t i = index * 6;
+
+    return glm::vec3(
+        vertices[i + 0],
+        vertices[i + 1],
+        vertices[i + 2]
+    );
+}
+
+glm::vec3 closestPointOnTriangle(
+    glm::vec3 p,
+    glm::vec3 a,
+    glm::vec3 b,
+    glm::vec3 c)
+{
+    glm::vec3 ab = b - a;
+    glm::vec3 ac = c - a;
+    glm::vec3 ap = p - a;
+
+    float d1 = glm::dot(ab, ap);
+    float d2 = glm::dot(ac, ap);
+
+    if (d1 <= 0.0f && d2 <= 0.0f)
+        return a;
+
+    glm::vec3 bp = p - b;
+
+    float d3 = glm::dot(ab, bp);
+    float d4 = glm::dot(ac, bp);
+
+    if (d3 >= 0.0f && d4 <= d3)
+        return b;
+
+    float vc = d1 * d4 - d3 * d2;
+
+    if (vc <= 0.0f && d1 >= 0.0f && d3 <= 0.0f)
+    {
+        float t = d1 / (d1 - d3);
+        return a + t * ab;
+    }
+
+    glm::vec3 cp = p - c;
+
+    float d5 = glm::dot(ab, cp);
+    float d6 = glm::dot(ac, cp);
+
+    if (d6 >= 0.0f && d5 <= d6)
+        return c;
+
+    float vb = d5 * d2 - d1 * d6;
+
+    if (vb <= 0.0f && d2 >= 0.0f && d6 <= 0.0f)
+    {
+        float t = d2 / (d2 - d6);
+        return a + t * ac;
+    }
+
+    float va = d3 * d6 - d5 * d4;
+
+    if (va <= 0.0f &&
+        (d4 - d3) >= 0.0f &&
+        (d5 - d6) >= 0.0f)
+    {
+        float t = (d4 - d3) /
+                  ((d4 - d3) + (d5 - d6));
+
+        return b + t * (c - b);
+    }
+
+    float denom = 1.0f / (va + vb + vc);
+
+    float v = vb * denom;
+    float w = vc * denom;
+
+    return a + ab * v + ac * w;
+}
+
+int findClosestTriangle(
+    const std::vector<float>& vertices,
+    const std::vector<unsigned int>& indices,
+    glm::vec3 pos,
+    glm::vec3& findClosestPoint,
+    float& closestDistance)
+{
+    closestDistance = FLT_MAX;
+
+    int triangle = -1;
+
+    for (size_t i = 0; i < indices.size(); i += 3)
+    {
+        unsigned int ia = indices[i + 0] * 6;
+        unsigned int ib = indices[i + 1] * 6;
+        unsigned int ic = indices[i + 2] * 6;
+
+        glm::vec3 A(vertices[ia], vertices[ia] + 1, vertices[ia] + 2);
+        glm::vec3 B(vertices[ib], vertices[ib + 1], vertices[ib + 2]);
+        glm::vec3 C(vertices[ic], vertices[ic + 1], vertices[ic + 2]);
+
+        glm::vec3 point = closestPointOnTriangle(pos, A, B, C);
+
+        float distance = glm::length(pos - point);
+
+        if (distance < closestDistance)
+        {
+            closestDistance = distance;
+            findClosestPoint = point;
+            triangle = i / 3;
+        }
+    }
+
+    return triangle;
+}
+
+float findMeshTOI(
+    glm::vec3 pos,
+    glm::vec3 velocity,
+    float radius,
+    float dt,
+    const std::vector<float>& vertices,
+    const std::vector<unsigned int>& indices,
+    glm::vec3& collisionNormal)
+{
+    float closestTOI = FLT_MAX;
+
+    float searchRadius =
+        radius + glm::length(velocity) * dt;
+
+    for (size_t i = 0; i + 2 < indices.size(); i += 3)
+    {
+        unsigned int ia = indices[i + 0] * 6;
+        unsigned int ib = indices[i + 1] * 6;
+        unsigned int ic = indices[i + 2] * 6;
+
+        glm::vec3 A(
+            vertices[ia + 0],
+            vertices[ia + 1],
+            vertices[ia + 2]
+        );
+
+        glm::vec3 B(
+            vertices[ib + 0],
+            vertices[ib + 1],
+            vertices[ib + 2]
+        );
+
+        glm::vec3 C(
+            vertices[ic + 0],
+            vertices[ic + 1],
+            vertices[ic + 2]
+        );
+
+        glm::vec3 center = (A + B + C) / 3.0f;
+
+        float triangleRadius = glm::max(
+            glm::length(A - center),
+            glm::max(
+                glm::length(B - center),
+                glm::length(C - center)
+            )
+        );
+
+        float maxDistance =
+            searchRadius + triangleRadius;
+
+        float dist2 =
+            glm::dot(center - pos, center - pos);
+
+        if (dist2 > maxDistance * maxDistance)
+            continue;
+
+        float toi = findTOI(
+            pos,
+            velocity,
+            radius,
+            A,
+            B,
+            C,
+            dt
+        );
+
+        if (toi >= 0.0f && toi < closestTOI)
+        {
+            closestTOI = toi;
+
+            collisionNormal =
+                glm::normalize(
+                    glm::cross(B - A, C - A)
+                );
+        }
+    }
+
+    if (closestTOI == FLT_MAX)
+        return -1.0f;
+
+    return closestTOI;
 }
 
 int main() {
@@ -283,13 +562,18 @@ int main() {
     GLFWmonitor* monitor = glfwGetPrimaryMonitor();
     const GLFWvidmode* mode = glfwGetVideoMode(monitor);
     
+    float feetR = 1.f;
     float walkSpeed = 3.f;
     float delta = 0.f;
     float timeEnd = glfwGetTime();
     float timeBegin;
 
+    glm::vec3 velocity(0, 0, 0);
+    float jumpHeight = 2;
+
     static bool f1WasDown = false;
     static bool escWasDown = false;
+    static bool onGround = false;
     
     bool mouseFree = 0;
 
@@ -351,24 +635,67 @@ int main() {
         glm::vec3 right = glm::normalize(glm::cross(moveDir, glm::vec3(0.f, 1.f, 0.f)));
 
         if(glfwGetKey(window, GLFW_KEY_W)) {
-            eyePos += walkSpeed * moveDir * delta;
+            velocity += walkSpeed * moveDir * delta;
         }
         if(glfwGetKey(window, GLFW_KEY_S)) {
-            eyePos -= walkSpeed * moveDir * delta;
+            velocity -= walkSpeed * moveDir * delta;
         }
         if(glfwGetKey(window, GLFW_KEY_D)) {
-            eyePos += walkSpeed * right * delta;
+            velocity += walkSpeed * right * delta;
         }
         if(glfwGetKey(window, GLFW_KEY_A)) {
-            eyePos -= walkSpeed * right * delta;
+            velocity -= walkSpeed * right * delta;
         }
-        if(glfwGetKey(window, GLFW_KEY_E)) {
-            eyePos.y += walkSpeed / 2 * delta;
+        if(glfwGetKey(window, GLFW_KEY_SPACE) && onGround) {
+            velocity.y += jumpHeight;
+            onGround = false;
         }
-        if(glfwGetKey(window, GLFW_KEY_Q)) {
-            eyePos.y -= walkSpeed / 2 * delta;
-        }
+        
+        velocity.x *= glm::pow(0.14, delta);
+        velocity.z *= glm::pow(0.14, delta);
+        velocity.y -= 1 * delta;
 
+        float remaining = delta;
+
+        onGround = false;
+        for (int iteration = 0; iteration < 4 && remaining > 0.0f; iteration++)
+        {
+            glm::vec3 collisionNormal;
+
+            float toi = findMeshTOI(
+                legPos,
+                velocity,
+                feetR,
+                remaining,
+                verts,
+                inds,
+                collisionNormal
+            );
+
+            // Nothing hit
+            if (toi < 0.0f)
+            {
+                legPos += velocity * remaining;
+                break;
+            }
+
+            // Move exactly to collision
+            legPos += velocity * toi;
+
+            // Remove velocity going into the surface
+            float vn = glm::dot(velocity, collisionNormal);
+
+            if (vn < 0.0f)
+                velocity -= vn * collisionNormal;
+
+            // Continue with the remaining frame time
+            remaining -= toi;
+            if (glm::dot(collisionNormal, glm::vec3(0, 1, 0)) >= 0.2588f)
+                onGround = true;
+        }
+        
+        eyePos = legPos;
+        eyePos.y += 2;
         legPos.y = eyePos.y - 2;
 
         gl.Clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);

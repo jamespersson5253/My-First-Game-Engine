@@ -10,9 +10,13 @@
 #include <fstream>
 #include <string>
 #include <sstream>
+#include <array>
 
 std::vector<float> verts;
 std::vector<unsigned int> inds;
+std::vector<float> lights;
+std::vector<float> radius;
+std::vector<float> brightness;
 
 GladGLContext gl;
 
@@ -31,6 +35,8 @@ void formatMesh(const std::string& input) {
 
     verts.clear();
     inds.clear();
+    lights.clear();
+    lights.reserve(128);
 
     while (std::getline(ss, line)) {
         std::stringstream ls(line);
@@ -39,12 +45,12 @@ void formatMesh(const std::string& input) {
         ls >> type;
 
         if (type == 'v') {
-            float x, y, z, r, g, b;
+            float x, y, z, r, g, b, nx, ny, nz;
             char c;
 
-            ls >> x >> y >> z >> c >> r >> g >> b;
+            ls >> x >> y >> z >> c >> r >> g >> b >> c >> nx >> ny >> nz;
 
-            verts.insert(verts.end(), { x, y, z, r, g, b });
+            verts.insert(verts.end(), {x, y, z, r, g, b, nx, ny, nz});
         }
         else if (type == 'i') {
             unsigned int a, b, c;
@@ -52,6 +58,13 @@ void formatMesh(const std::string& input) {
             ls >> a >> b >> c;
 
             inds.insert(inds.end(), { a, b, c });
+        }
+        else if (type == 'l') {
+            float x, y, z, b, r;
+            ls >> x >> y >> z >> r >> b;
+            lights.insert(lights.end(), {x, y, z});
+            radius.insert(lights.end(), r);
+            brightness.insert(lights.end(), b);
         }
     }
 
@@ -487,7 +500,7 @@ int main() {
         3,
         GL_FLOAT, 
         GL_FALSE, 
-        6*sizeof(float), 
+        9*sizeof(float), 
         nullptr
     );
     gl.EnableVertexAttribArray(0);
@@ -496,10 +509,19 @@ int main() {
         3, 
         GL_FLOAT, 
         GL_FALSE, 
-        6*sizeof(float),
+        9*sizeof(float),
         (void*)(3*sizeof(float))
     );
     gl.EnableVertexAttribArray(1);
+    gl.VertexAttribPointer(
+        2,
+        3,
+        GL_FLOAT,
+        GL_FALSE,
+        9*sizeof(float),
+        (void*)(6*sizeof(float))
+    );
+    gl.EnableVertexAttribArray(2);
 
     std::string vtSrcStr = getFile("shaders/vt.glsl");
     const char* vtSrc = vtSrcStr.c_str();
@@ -549,6 +571,9 @@ int main() {
     GLint modelLoc = gl.GetUniformLocation(prog, "model");
     GLint viewLoc = gl.GetUniformLocation(prog, "view");
     GLint projectionLoc = gl.GetUniformLocation(prog, "projection");
+    GLint lightLoc = gl.GetUniformLocation(prog, "lights");
+    GLint radiusLoc = gl.GetUniformLocation(prog, "radius");
+    GLint brightnessLoc = gl.GetUniformLocation(prog, "brightness");
 
     gl.DeleteShader(vert);
     gl.DeleteShader(frag);
@@ -712,6 +737,9 @@ int main() {
         gl.UniformMatrix4fv(projectionLoc, 1, GL_FALSE, glm::value_ptr(proj));
         gl.UniformMatrix4fv(viewLoc, 1, GL_FALSE, glm::value_ptr(view));
         gl.UniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
+        gl.Uniform3fv(lightLoc, 128, lights.data());
+        gl.Uniform1fv(brightnessLoc, 128, brightness.data());
+        gl.Uniform1fv(radiusLoc, 128, radius.data());
 
         gl.DrawElements(GL_TRIANGLES, static_cast<GLsizei>(inds.size()), GL_UNSIGNED_INT, nullptr);
         

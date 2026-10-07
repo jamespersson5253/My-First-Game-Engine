@@ -11,6 +11,7 @@
 #include <string>
 #include <sstream>
 #include <array>
+#include <cfloat>
 
 std::vector<float> verts;
 std::vector<unsigned int> inds;
@@ -160,166 +161,6 @@ void mouse_callback(GLFWwindow* window, double xpos, double ypos)
     );
 }
 
-bool pointInsideTriangle(
-    glm::vec3 P,
-    glm::vec3 A,
-    glm::vec3 B,
-    glm::vec3 C
-)
-{
-    glm::vec3 n = glm::normalize(
-        glm::cross(B - A, C - A)
-    );
-
-    glm::vec3 c0 = glm::cross(B - A, P - A);
-    glm::vec3 c1 = glm::cross(C - B, P - B);
-    glm::vec3 c2 = glm::cross(A - C, P - C);
-
-    return glm::dot(c0, n) >= 0.0f &&
-           glm::dot(c1, n) >= 0.0f &&
-           glm::dot(c2, n) >= 0.0f;
-}
-
-float findTOI(
-    glm::vec3 pos,
-    glm::vec3 velocity,
-    float radius,
-    glm::vec3 A,
-    glm::vec3 B,
-    glm::vec3 C,
-    float dt,
-    glm::vec3& collisionNormal
-)
-{
-    float speed = glm::length(velocity);
-
-    // If we're already intersecting the triangle, resolve it immediately.
-    glm::vec3 initialPoint =
-        closestPointOnTriangle(pos, A, B, C);
-
-    float initialDistance =
-        glm::length(pos - initialPoint);
-
-    glm::vec3 faceNormal =
-        glm::cross(B - A, C - A);
-
-    float faceLength = glm::length(faceNormal);
-
-    if (faceLength <= 0.000001f)
-        return -1.0f;
-
-    faceNormal /= faceLength;
-
-    if (initialDistance <= radius)
-    {
-        if (initialDistance > 0.000001f)
-        {
-            collisionNormal =
-                (pos - initialPoint) / initialDistance;
-        }
-        else
-        {
-            collisionNormal = faceNormal;
-
-            if (glm::dot(collisionNormal, velocity) > 0.0f)
-                collisionNormal = -collisionNormal;
-        }
-
-        return 0.0f;
-    }
-
-    if (speed <= 0.000001f)
-        return -1.0f;
-
-    // Conservative advancement:
-    // the sphere center moves along a straight line while the closest
-    // point on the triangle changes continuously. Advancing by
-    // distance / speed cannot skip the first contact.
-    float t = 0.0f;
-
-    for (int iteration = 0; iteration < 32; iteration++)
-    {
-        glm::vec3 center =
-            pos + velocity * t;
-
-        glm::vec3 closest =
-            closestPointOnTriangle(center, A, B, C);
-
-        glm::vec3 offset =
-            center - closest;
-
-        float distance =
-            glm::length(offset);
-
-        if (distance <= radius + 0.00001f)
-        {
-            if (distance > 0.000001f)
-            {
-                collisionNormal = offset / distance;
-            }
-            else
-            {
-                collisionNormal = faceNormal;
-
-                if (glm::dot(collisionNormal, velocity) > 0.0f)
-                    collisionNormal = -collisionNormal;
-            }
-
-            return t;
-        }
-
-        float distanceToContact =
-            distance - radius;
-
-        float advance =
-            distanceToContact / speed;
-
-        if (advance <= 0.000001f)
-            break;
-
-        t += advance;
-
-        if (t > dt)
-            return -1.0f;
-    }
-
-    // A final check prevents precision issues at the end of the frame.
-    glm::vec3 finalCenter =
-        pos + velocity * dt;
-
-    glm::vec3 finalPoint =
-        closestPointOnTriangle(finalCenter, A, B, C);
-
-    float finalDistance =
-        glm::length(finalCenter - finalPoint);
-
-    if (finalDistance <= radius + 0.00001f)
-    {
-        if (finalDistance > 0.000001f)
-            collisionNormal =
-                glm::normalize(finalCenter - finalPoint);
-        else
-            collisionNormal = faceNormal;
-
-        return dt;
-    }
-
-    return -1.0f;
-}
-
-glm::vec3 getVertexPosition(
-    const std::vector<float>& vertices,
-    unsigned int index)
-{
-    size_t i = index * 6;
-
-    return glm::vec3(
-        vertices[i + 0],
-        vertices[i + 1],
-        vertices[i + 2]
-    );
-}
-
 glm::vec3 closestPointOnTriangle(
     glm::vec3 p,
     glm::vec3 a,
@@ -388,40 +229,138 @@ glm::vec3 closestPointOnTriangle(
     return a + ab * v + ac * w;
 }
 
-int findClosestTriangle(
-    const std::vector<float>& vertices,
-    const std::vector<unsigned int>& indices,
+float findTOI(
     glm::vec3 pos,
-    glm::vec3& findClosestPoint,
-    float& closestDistance)
+    glm::vec3 velocity,
+    float radius,
+    glm::vec3 A,
+    glm::vec3 B,
+    glm::vec3 C,
+    float dt,
+    glm::vec3& collisionNormal,
+    float& penetration
+)
 {
-    closestDistance = FLT_MAX;
+    const float epsilon = 0.00001f;
 
-    int triangle = -1;
+    penetration = 0.0f;
 
-    for (size_t i = 0; i < indices.size(); i += 3)
+    glm::vec3 faceNormal =
+        glm::cross(B - A, C - A);
+
+    float faceLength = glm::length(faceNormal);
+
+    if (faceLength <= 0.000001f)
+        return -1.0f;
+
+    faceNormal /= faceLength;
+
+    glm::vec3 initialPoint =
+        closestPointOnTriangle(pos, A, B, C);
+
+    glm::vec3 initialOffset =
+        pos - initialPoint;
+
+    float initialDistance =
+        glm::length(initialOffset);
+
+    // The sphere is already inside the triangle's swept volume.
+    // Report the penetration so the caller can push it back out.
+    if (initialDistance < radius - epsilon)
     {
-        unsigned int ia = indices[i + 0] * 6;
-        unsigned int ib = indices[i + 1] * 6;
-        unsigned int ic = indices[i + 2] * 6;
-
-        glm::vec3 A(vertices[ia], vertices[ia] + 1, vertices[ia] + 2);
-        glm::vec3 B(vertices[ib], vertices[ib + 1], vertices[ib + 2]);
-        glm::vec3 C(vertices[ic], vertices[ic + 1], vertices[ic + 2]);
-
-        glm::vec3 point = closestPointOnTriangle(pos, A, B, C);
-
-        float distance = glm::length(pos - point);
-
-        if (distance < closestDistance)
+        if (initialDistance > 0.000001f)
         {
-            closestDistance = distance;
-            findClosestPoint = point;
-            triangle = i / 3;
+            collisionNormal =
+                initialOffset / initialDistance;
         }
+        else
+        {
+            collisionNormal = faceNormal;
+
+            if (glm::dot(collisionNormal, velocity) > 0.0f)
+                collisionNormal = -collisionNormal;
+        }
+
+        penetration = radius - initialDistance;
+        return 0.0f;
     }
 
-    return triangle;
+    // Exactly touching the surface is only a collision if the sphere
+    // is moving into it. Otherwise we must allow tangential movement.
+    if (glm::abs(initialDistance - radius) <= epsilon)
+    {
+        glm::vec3 normal;
+
+        if (initialDistance > 0.000001f)
+            normal = initialOffset / initialDistance;
+        else
+            normal = faceNormal;
+
+        if (glm::dot(velocity, normal) < 0.0f)
+        {
+            collisionNormal = normal;
+            return 0.0f;
+        }
+
+        return -1.0f;
+    }
+
+    float speed = glm::length(velocity);
+
+    if (speed <= 0.000001f)
+        return -1.0f;
+
+    // Conservative advancement. The sphere center advances by a safe
+    // amount based on its current distance from the triangle.
+    float t = 0.0f;
+
+    for (int iteration = 0; iteration < 32; iteration++)
+    {
+        glm::vec3 center =
+            pos + velocity * t;
+
+        glm::vec3 closest =
+            closestPointOnTriangle(center, A, B, C);
+
+        glm::vec3 offset =
+            center - closest;
+
+        float distance =
+            glm::length(offset);
+
+        if (distance <= radius + epsilon)
+        {
+            if (distance > 0.000001f)
+            {
+                collisionNormal = offset / distance;
+            }
+            else
+            {
+                collisionNormal = faceNormal;
+
+                if (glm::dot(collisionNormal, velocity) > 0.0f)
+                    collisionNormal = -collisionNormal;
+            }
+
+            return t;
+        }
+
+        float distanceToContact =
+            distance - radius;
+
+        float advance =
+            distanceToContact / speed;
+
+        if (advance <= 0.000001f)
+            break;
+
+        t += advance;
+
+        if (t > dt)
+            return -1.0f;
+    }
+
+    return -1.0f;
 }
 
 float findMeshTOI(
@@ -431,18 +370,25 @@ float findMeshTOI(
     float dt,
     const std::vector<float>& vertices,
     const std::vector<unsigned int>& indices,
-    glm::vec3& collisionNormal)
+    glm::vec3& collisionNormal,
+    float& penetration
+)
 {
     float closestTOI = FLT_MAX;
+    penetration = 0.0f;
 
     float searchRadius =
         radius + glm::length(velocity) * dt;
 
     for (size_t i = 0; i + 2 < indices.size(); i += 3)
     {
-        unsigned int ia = indices[i + 0] * 6;
-        unsigned int ib = indices[i + 1] * 6;
-        unsigned int ic = indices[i + 2] * 6;
+        // Each vertex contains:
+        // x y z | r g b | nx ny nz
+        constexpr size_t vertexStride = 9;
+
+        unsigned int ia = indices[i + 0] * vertexStride;
+        unsigned int ib = indices[i + 1] * vertexStride;
+        unsigned int ic = indices[i + 2] * vertexStride;
 
         glm::vec3 A(
             vertices[ia + 0],
@@ -482,6 +428,7 @@ float findMeshTOI(
             continue;
 
         glm::vec3 triangleNormal;
+        float trianglePenetration = 0.0f;
 
         float toi = findTOI(
             pos,
@@ -491,13 +438,15 @@ float findMeshTOI(
             B,
             C,
             dt,
-            triangleNormal
+            triangleNormal,
+            trianglePenetration
         );
 
         if (toi >= 0.0f && toi < closestTOI)
         {
             closestTOI = toi;
             collisionNormal = triangleNormal;
+            penetration = trianglePenetration;
         }
     }
 
@@ -751,9 +700,10 @@ int main() {
         float remaining = delta;
 
         onGround = false;
-        for (int iteration = 0; iteration < 4 && remaining > 0.0f; iteration++)
+        for (int iteration = 0; iteration < 8 && remaining > 0.0f; iteration++)
         {
             glm::vec3 collisionNormal;
+            float penetration = 0.0f;
 
             float toi = findMeshTOI(
                 legPos,
@@ -762,29 +712,44 @@ int main() {
                 remaining,
                 verts,
                 inds,
-                collisionNormal
+                collisionNormal,
+                penetration
             );
 
-            // Nothing hit
+            // Nothing hit.
             if (toi < 0.0f)
             {
                 legPos += velocity * remaining;
                 break;
             }
 
-            // Move exactly to collision
+            // Move exactly to the first contact.
             legPos += velocity * toi;
 
-            // Remove velocity going into the surface
+            // If we started inside geometry, push the player completely
+            // outside the triangle before resolving velocity.
+            if (penetration > 0.0f)
+            {
+                legPos +=
+                    collisionNormal * (penetration + 0.0001f);
+            }
+
+            // Remove only the velocity component going into the surface.
             float vn = glm::dot(velocity, collisionNormal);
 
             if (vn < 0.0f)
                 velocity -= vn * collisionNormal;
 
-            // Continue with the remaining frame time
+            // Continue with the remaining frame time.
             remaining -= toi;
-            if (glm::dot(collisionNormal, glm::vec3(0, 1, 0)) >= 0.2588f)
+
+            if (glm::dot(
+                    collisionNormal,
+                    glm::vec3(0, 1, 0)
+                ) >= 0.2588f)
+            {
                 onGround = true;
+            }
         }
         
         eyePos = legPos;

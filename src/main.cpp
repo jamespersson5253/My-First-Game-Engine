@@ -187,55 +187,124 @@ float findTOI(
     glm::vec3 A,
     glm::vec3 B,
     glm::vec3 C,
-    float dt)
+    float dt,
+    glm::vec3& collisionNormal
+)
 {
-    glm::vec3 normal =
-        glm::normalize(glm::cross(B - A, C - A));
+    float speed = glm::length(velocity);
 
-    float d0 = glm::dot(pos - A, normal);
-    float vn = glm::dot(velocity, normal);
+    // If we're already intersecting the triangle, resolve it immediately.
+    glm::vec3 initialPoint =
+        closestPointOnTriangle(pos, A, B, C);
 
-    if (d0 < 0.0f)
+    float initialDistance =
+        glm::length(pos - initialPoint);
+
+    glm::vec3 faceNormal =
+        glm::cross(B - A, C - A);
+
+    float faceLength = glm::length(faceNormal);
+
+    if (faceLength <= 0.000001f)
+        return -1.0f;
+
+    faceNormal /= faceLength;
+
+    if (initialDistance <= radius)
     {
-        normal = -normal;
-        d0 = -d0;
-        vn = -vn;
+        if (initialDistance > 0.000001f)
+        {
+            collisionNormal =
+                (pos - initialPoint) / initialDistance;
+        }
+        else
+        {
+            collisionNormal = faceNormal;
+
+            if (glm::dot(collisionNormal, velocity) > 0.0f)
+                collisionNormal = -collisionNormal;
+        }
+
+        return 0.0f;
     }
 
-    if (vn >= 0.0f)
+    if (speed <= 0.000001f)
         return -1.0f;
 
-    float toi = (d0 - radius) / -vn;
+    // Conservative advancement:
+    // the sphere center moves along a straight line while the closest
+    // point on the triangle changes continuously. Advancing by
+    // distance / speed cannot skip the first contact.
+    float t = 0.0f;
 
-    if (toi < 0.0f || toi > dt)
-        return -1.0f;
-
-    glm::vec3 impactPos =
-        pos + velocity * toi;
-
-    float distance =
-        glm::dot(impactPos - A, normal);
-
-    glm::vec3 contactPoint =
-        impactPos - distance * normal;
-
-    glm::vec3 c0 =
-        glm::cross(B - A, contactPoint - A);
-
-    glm::vec3 c1 =
-        glm::cross(C - B, contactPoint - B);
-
-    glm::vec3 c2 =
-        glm::cross(A - C, contactPoint - C);
-
-    if (glm::dot(c0, normal) < 0.0f ||
-        glm::dot(c1, normal) < 0.0f ||
-        glm::dot(c2, normal) < 0.0f)
+    for (int iteration = 0; iteration < 32; iteration++)
     {
-        return -1.0f;
+        glm::vec3 center =
+            pos + velocity * t;
+
+        glm::vec3 closest =
+            closestPointOnTriangle(center, A, B, C);
+
+        glm::vec3 offset =
+            center - closest;
+
+        float distance =
+            glm::length(offset);
+
+        if (distance <= radius + 0.00001f)
+        {
+            if (distance > 0.000001f)
+            {
+                collisionNormal = offset / distance;
+            }
+            else
+            {
+                collisionNormal = faceNormal;
+
+                if (glm::dot(collisionNormal, velocity) > 0.0f)
+                    collisionNormal = -collisionNormal;
+            }
+
+            return t;
+        }
+
+        float distanceToContact =
+            distance - radius;
+
+        float advance =
+            distanceToContact / speed;
+
+        if (advance <= 0.000001f)
+            break;
+
+        t += advance;
+
+        if (t > dt)
+            return -1.0f;
     }
 
-    return toi;
+    // A final check prevents precision issues at the end of the frame.
+    glm::vec3 finalCenter =
+        pos + velocity * dt;
+
+    glm::vec3 finalPoint =
+        closestPointOnTriangle(finalCenter, A, B, C);
+
+    float finalDistance =
+        glm::length(finalCenter - finalPoint);
+
+    if (finalDistance <= radius + 0.00001f)
+    {
+        if (finalDistance > 0.000001f)
+            collisionNormal =
+                glm::normalize(finalCenter - finalPoint);
+        else
+            collisionNormal = faceNormal;
+
+        return dt;
+    }
+
+    return -1.0f;
 }
 
 glm::vec3 getVertexPosition(
@@ -412,6 +481,8 @@ float findMeshTOI(
         if (dist2 > maxDistance * maxDistance)
             continue;
 
+        glm::vec3 triangleNormal;
+
         float toi = findTOI(
             pos,
             velocity,
@@ -419,17 +490,14 @@ float findMeshTOI(
             A,
             B,
             C,
-            dt
+            dt,
+            triangleNormal
         );
 
         if (toi >= 0.0f && toi < closestTOI)
         {
             closestTOI = toi;
-
-            collisionNormal =
-                glm::normalize(
-                    glm::cross(B - A, C - A)
-                );
+            collisionNormal = triangleNormal;
         }
     }
 

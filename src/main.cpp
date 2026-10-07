@@ -64,8 +64,8 @@ void formatMesh(const std::string& input) {
             float x, y, z, b, r;
             ls >> x >> y >> z >> r >> b;
             lights.insert(lights.end(), {x, y, z});
-            radius.insert(lights.end(), r);
-            brightness.insert(lights.end(), b);
+            radius.insert(radius.end(), r);
+            brightness.insert(brightness.end(), b);
         }
     }
 
